@@ -1,4 +1,4 @@
-﻿package ga.streameast.tv
+package ga.streameast.tv
 
 import android.annotation.SuppressLint
 import android.graphics.Color
