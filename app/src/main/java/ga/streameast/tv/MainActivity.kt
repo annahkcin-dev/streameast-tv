@@ -19,13 +19,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
-    private val appVersionTag = "TV v1.1"
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Deep dark slate background so there is zero white flash on launch
         window.decorView.setBackgroundColor(Color.parseColor("#0B1120"))
 
         webView = WebView(this).apply {
@@ -46,14 +44,12 @@ class MainActivity : AppCompatActivity() {
             databaseEnabled = true
             mediaPlaybackRequiresUserGesture = false
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-
-            // Fit 1040px desktop layout edge-to-edge left-to-right on Google TV
             useWideViewPort = true
             loadWithOverviewMode = true
-            userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            userAgentString =
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         }
 
-        // Support HTML5 Fullscreen video API cleanly on Google TV
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
                 if (customView != null) {
@@ -71,6 +67,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 )
                 webView.visibility = View.GONE
+                enableImmersiveMode()
             }
 
             override fun onHideCustomView() {
@@ -80,114 +77,196 @@ class MainActivity : AppCompatActivity() {
                 customViewCallback?.onCustomViewHidden()
                 customViewCallback = null
                 webView.visibility = View.VISIBLE
+                enableImmersiveMode()
             }
         }
 
         webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+            override fun shouldOverrideUrlLoading(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): Boolean {
+                val url = request?.url?.toString() ?: return false
+                val host = request.url?.host?.lowercase() ?: ""
+                if (url.startsWith("intent:") || url.startsWith("market:")) return true
+                if (host.isNotEmpty() &&
+                    !host.contains("streameast") &&
+                    !host.contains("premium") &&
+                    !host.contains("embed") &&
+                    !host.contains("stream") &&
+                    !host.contains("player") &&
+                    !host.contains("cdn") &&
+                    !host.contains("cloudflare")
+                ) {
+                    if (request.isForMainFrame) return true
+                }
                 return false
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                injectTvEnhancements(view)
+                injectTvEnhancements()
             }
         }
 
-        webView.loadUrl("https://v2.streameast.ga/nfl-streams/")
+        enableImmersiveMode()
+        webView.loadUrl("https://streameastapp.info/")
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) enableImmersiveMode()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun enableImmersiveMode() {
+        window.decorView.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        )
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val keyCode = event.keyCode
-        val isDpadOrBack = keyCode == KeyEvent.KEYCODE_DPAD_UP ||
-                keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
-                keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
-                keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
-                keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                keyCode == KeyEvent.KEYCODE_ENTER ||
-                keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
-                keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD ||
-                keyCode == KeyEvent.KEYCODE_MEDIA_REWIND ||
-                keyCode == KeyEvent.KEYCODE_BACK
-
-        if (isDpadOrBack) {
-            if (event.action == KeyEvent.ACTION_DOWN) {
-                val jsKey = when (keyCode) {
-                    KeyEvent.KEYCODE_DPAD_UP -> "ArrowUp"
-                    KeyEvent.KEYCODE_DPAD_DOWN -> "ArrowDown"
-                    KeyEvent.KEYCODE_DPAD_LEFT -> "ArrowLeft"
-                    KeyEvent.KEYCODE_DPAD_RIGHT -> "ArrowRight"
-                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> "Enter"
-                    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> "MediaPlayPause"
-                    KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> "MediaFastForward"
-                    KeyEvent.KEYCODE_MEDIA_REWIND -> "MediaRewind"
-                    KeyEvent.KEYCODE_BACK -> "Back"
-                    else -> ""
-                }
-                if (jsKey.isNotEmpty()) {
-                    val script = "window.__streamEastHandleTvKey ? window.__streamEastHandleTvKey('$jsKey') : false;"
-                    webView.evaluateJavascript(script) { result ->
-                        if (keyCode == KeyEvent.KEYCODE_BACK && result != "true") {
-                            if (customView != null) {
-                                webView.webChromeClient?.onHideCustomView()
-                            } else if (webView.canGoBack()) {
-                                webView.goBack()
-                            } else {
-                                finish()
-                            }
-                        }
-                    }
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    sendTvKey("UP")
                     return true
                 }
-            } else if (event.action == KeyEvent.ACTION_UP) {
-                return true
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    sendTvKey("DOWN")
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    sendTvKey("LEFT")
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    sendTvKey("RIGHT")
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                    sendTvKey("CENTER")
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                    sendTvKey("PLAY_PAUSE")
+                    return true
+                }
+                KeyEvent.KEYCODE_BACK -> {
+                    handleBackKey()
+                    return true
+                }
             }
         }
-
         return super.dispatchKeyEvent(event)
     }
 
-    private fun injectTvEnhancements(view: WebView?) {
+    private fun sendTvKey(key: String) {
+        webView.evaluateJavascript("window.__tvHandleKey && window.__tvHandleKey('$key');", null)
+    }
+
+    private fun handleBackKey() {
+        webView.evaluateJavascript(
+            "(function(){ return !!(window.__tvHandleBack && window.__tvHandleBack()); })()"
+        ) { result ->
+            if (result != "true") {
+                if (customView != null) {
+                    webView.webChromeClient?.onHideCustomView()
+                } else if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    finish()
+                }
+            }
+        }
+    }
+
+    private fun injectTvEnhancements() {
         val js = """
             (function() {
-                if (window.__streamEastTvInjected) return;
-                window.__streamEastTvInjected = true;
-
-                // 1. Force 1040px desktop viewport so Google TV scales edge-to-edge cleanly
-                var meta = document.querySelector('meta[name="viewport"]');
-                if (!meta) {
-                    meta = document.createElement('meta');
-                    meta.name = 'viewport';
-                    document.head.appendChild(meta);
+                if (window.__tvInjected) {
+                    if (window.__tvRefresh) window.__tvRefresh();
+                    return;
                 }
-                meta.content = 'width=1040';
+                window.__tvInjected = true;
 
-                // 2. Inject TV styling: full-bleed theater video mode, hidden controls until requested, high-contrast green/white focus ring
-                var style = document.createElement('style');
-                style.id = 'streameast-tv-style';
+                const LEAGUES = ['NFL', 'NBA', 'MLB', 'NHL', 'MMA', 'BOXING', 'NCAA', 'WWE'];
+
+                function isStreamPage() {
+                    const p = location.pathname.toLowerCase();
+                    if (p.includes('/custom-stream/') || p.includes('/stream/')) return true;
+                    return !!findPlayerIframe() || !!findAllVideos().length;
+                }
+
+                function findPlayerIframe() {
+                    const iframes = Array.from(document.querySelectorAll('iframe'));
+                    return iframes.find(f => (f.title || '').toLowerCase().includes('premium667'))
+                        || iframes.find(f => {
+                            const s = (f.src || '').toLowerCase();
+                            return s.includes('stream') || s.includes('embed') || s.includes('player') || s.includes('premium');
+                        })
+                        || iframes.find(f => {
+                            const r = f.getBoundingClientRect();
+                            return r.width > 200 && r.height > 150;
+                        })
+                        || null;
+                }
+
+                function findAllVideos() {
+                    const vids = Array.from(document.querySelectorAll('video'));
+                    document.querySelectorAll('iframe').forEach(f => {
+                        try {
+                            const doc = f.contentDocument || (f.contentWindow && f.contentWindow.document);
+                            if (doc) vids.push(...Array.from(doc.querySelectorAll('video')));
+                        } catch (e) {}
+                    });
+                    return vids;
+                }
+
+                function getAllDocs() {
+                    const docs = [document];
+                    document.querySelectorAll('iframe').forEach(f => {
+                        try {
+                            const doc = f.contentDocument || (f.contentWindow && f.contentWindow.document);
+                            if (doc) docs.push(doc);
+                        } catch (e) {}
+                    });
+                    return docs;
+                }
+
+                const style = document.createElement('style');
+                style.id = 'tv-leanback-style';
                 style.textContent = `
                     html, body {
-                        background-color: #0B1120 !important;
-                        width: 100% !important;
-                        max-width: 100% !important;
+                        background: #0B1120 !important;
                         overflow-x: hidden !important;
+                    }
+                    [data-tv-focus="1"] {
+                        transition: transform 0.12s ease, box-shadow 0.12s ease, outline 0.12s ease !important;
+                    }
+                    [data-tv-focus="1"].tv-focused,
+                    [data-tv-focus="1"]:focus {
+                        outline: 3px solid #38BDF8 !important;
+                        outline-offset: 2px !important;
+                        box-shadow: 0 0 0 5px rgba(56, 189, 248, 0.35), 0 8px 24px rgba(0, 0, 0, 0.55) !important;
+                        transform: scale(1.02) !important;
+                        z-index: 50 !important;
+                        position: relative !important;
+                    }
+                    body.tv-theater-mode {
+                        overflow: hidden !important;
                         margin: 0 !important;
+                        padding: 0 !important;
+                        background: #000 !important;
                     }
-                    *, *::before, *::after {
-                        animation-duration: 0.01ms !important;
-                        animation-iteration-count: 1 !important;
-                        transition-duration: 0.01ms !important;
-                        scroll-behavior: auto !important;
-                    }
-                    /* High-visibility YouTube-style focus ring for D-pad navigation */
-                    a:focus, button:focus, input:focus, select:focus, [tabindex]:focus, .streameast-tv-focused {
-                        outline: 3px solid #ffffff !important;
-                        outline-offset: 3px !important;
-                        box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.85) !important;
-                        border-radius: 8px !important;
-                    }
-                    /* Fullscreen Theater Lock: expands video wrapper edge-to-edge and hides surrounding page UI */
-                    .streameast-tv-theater-wrapper {
+                    body.tv-theater-mode .tv-player-fullscreen {
                         position: fixed !important;
                         top: 0 !important;
                         left: 0 !important;
@@ -195,474 +274,449 @@ class MainActivity : AppCompatActivity() {
                         height: 100vh !important;
                         max-width: 100vw !important;
                         max-height: 100vh !important;
-                        z-index: 2147483000 !important;
-                        background: #000000 !important;
                         margin: 0 !important;
                         padding: 0 !important;
-                    }
-                    .streameast-tv-theater-wrapper video {
-                        width: 100% !important;
-                        height: 100% !important;
+                        border: none !important;
+                        z-index: 2147483640 !important;
+                        background: #000 !important;
                         object-fit: contain !important;
                     }
-                    /* Keep player overlay controls completely hidden until user explicitly opens HUD */
-                    body.streameast-tv-hud-hidden .streameast-tv-theater-wrapper button,
-                    body.streameast-tv-hud-hidden .streameast-tv-theater-wrapper [role="button"],
-                    body.streameast-tv-hud-hidden .streameast-tv-theater-wrapper [class*="control"],
-                    body.streameast-tv-hud-hidden .streameast-tv-theater-wrapper [class*="overlay"],
-                    body.streameast-tv-hud-hidden .streameast-tv-theater-wrapper [class*="header"],
-                    body.streameast-tv-hud-hidden .streameast-tv-theater-wrapper [class*="top"],
-                    body.streameast-tv-hud-hidden .streameast-tv-theater-wrapper [class*="bottom"],
-                    body.streameast-tv-hud-hidden .streameast-tv-theater-wrapper input[type="range"] {
-                        opacity: 0 !important;
-                        pointer-events: none !important;
-                    }
-                    /* Hide non-TV clutter buttons inside active video player */
-                    .streameast-tv-hide-clutter {
-                        display: none !important;
-                    }
-                    /* YouTube-style HUD toast banner for playback/seek feedback */
-                    #streameast-tv-hud-toast {
+                    #tv-leanback-hud {
                         position: fixed;
-                        top: 28px;
-                        left: 50%;
-                        transform: translateX(-50%);
-                        padding: 10px 22px;
-                        border-radius: 999px;
-                        background: rgba(11, 17, 32, 0.90);
-                        border: 1px solid rgba(34, 197, 94, 0.55);
-                        color: #ffffff;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        padding: 28px 40px 26px;
+                        background: linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.68) 65%, rgba(0,0,0,0) 100%);
+                        color: #F8FAFC;
                         font-family: system-ui, -apple-system, sans-serif;
-                        font-size: 16px;
-                        font-weight: 600;
-                        letter-spacing: 0.3px;
                         z-index: 2147483647;
-                        pointer-events: none;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 14px;
                         opacity: 0;
-                    }
-                    #streameast-tv-hud-toast.visible {
-                        opacity: 1;
-                    }
-                    #streameast-tv-version-badge {
-                        position: fixed;
-                        bottom: 10px;
-                        right: 14px;
-                        padding: 3px 8px;
-                        border-radius: 6px;
-                        background: rgba(11, 17, 32, 0.8);
-                        border: 1px solid rgba(34, 197, 94, 0.4);
-                        color: rgba(134, 239, 172, 0.8);
-                        font-family: system-ui, -apple-system, sans-serif;
-                        font-size: 11px;
-                        font-weight: 600;
-                        letter-spacing: 0.5px;
-                        z-index: 99998;
                         pointer-events: none;
+                        transition: opacity 0.2s ease;
+                    }
+                    #tv-leanback-hud.visible {
+                        opacity: 1;
+                        pointer-events: auto;
+                    }
+                    .tv-hud-top {
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                    }
+                    .tv-live-badge {
+                        background: #DC2626;
+                        color: #FFFFFF;
+                        font-size: 13px;
+                        font-weight: 700;
+                        letter-spacing: 0.06em;
+                        padding: 4px 10px;
+                        border-radius: 4px;
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                    }
+                    .tv-stream-title {
+                        font-size: 20px;
+                        font-weight: 600;
+                        color: #F8FAFC;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    }
+                    .tv-hud-controls {
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                    }
+                    .tv-hud-btn {
+                        background: rgba(255, 255, 255, 0.14);
+                        color: #F8FAFC;
+                        border: 2px solid transparent;
+                        border-radius: 999px;
+                        padding: 9px 18px;
+                        font-size: 15px;
+                        font-weight: 600;
+                        cursor: pointer;
+                    }
+                    .tv-hud-btn.active-server {
+                        background: rgba(56, 189, 248, 0.25);
+                        border-color: rgba(56, 189, 248, 0.7);
+                    }
+                    .tv-hud-btn.hud-focused {
+                        background: #F8FAFC;
+                        color: #0F172A;
+                        border-color: #38BDF8;
+                        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.45);
                     }
                 `;
                 document.head.appendChild(style);
 
-                // 3. Version badge & HUD feedback pill
-                if (!document.getElementById('streameast-tv-version-badge')) {
-                    var badge = document.createElement('div');
-                    badge.id = 'streameast-tv-version-badge';
-                    badge.textContent = '$appVersionTag';
-                    document.body.appendChild(badge);
-                }
-                var toast = document.getElementById('streameast-tv-hud-toast');
-                if (!toast) {
-                    toast = document.createElement('div');
-                    toast.id = 'streameast-tv-hud-toast';
-                    document.body.appendChild(toast);
-                }
+                let navIndex = 0;
 
-                var toastTimer = null;
-                function showHudToast(msg) {
-                    toast.textContent = msg;
-                    toast.classList.add('visible');
-                    clearTimeout(toastTimer);
-                    toastTimer = setTimeout(function() {
-                        toast.classList.remove('visible');
-                    }, 1400);
-                }
-
-                // 4. Block native web player keydown handlers from double-firing volume/seek on Arrow keys
-                window.addEventListener('keydown', function(e) {
-                    if (e.isTrusted && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-                        e.stopImmediatePropagation();
-                        e.preventDefault();
-                    }
-                }, true);
-
-                // 5. YouTube-Style Fullscreen Theater + D-pad Engine
-                var hudOpen = false;
-                var userMovedFocusInHud = false;
-                var hudHideTimer = null;
-                var activeTheaterWrapper = null;
-                var exitedTheaterManually = false;
-
-                function getActiveVideo() {
-                    var videos = document.querySelectorAll('video');
-                    for (var i = 0; i < videos.length; i++) {
-                        var v = videos[i];
-                        if (v.offsetWidth > 150 && v.offsetHeight > 100) {
-                            return v;
+                function getNavItems() {
+                    const candidates = Array.from(document.querySelectorAll('a, button, [role="tab"], [role="button"], .game-row, .match-row'));
+                    const seen = new Set();
+                    const items = [];
+                    for (const el of candidates) {
+                        if (seen.has(el)) continue;
+                        if (el.closest('#tv-leanback-hud')) continue;
+                        const rect = el.getBoundingClientRect();
+                        if (rect.width < 24 || rect.height < 18) continue;
+                        const txt = (el.innerText || el.textContent || '').trim();
+                        const href = (el.getAttribute('href') || '').toLowerCase();
+                        const upper = txt.toUpperCase();
+                        const isLeagueTab = LEAGUES.some(l => upper === l || upper.startsWith(l + ' ') || href.includes('/' + l.toLowerCase()));
+                        const isGameRow = href.includes('/custom-stream/') || href.includes('/stream/') || el.classList.contains('game-row') || el.classList.contains('match-row');
+                        if (isLeagueTab || isGameRow) {
+                            seen.add(el);
+                            el.setAttribute('data-tv-focus', '1');
+                            el.setAttribute('tabindex', '0');
+                            items.push(el);
                         }
                     }
-                    return videos.length > 0 ? videos[0] : null;
+                    return items;
                 }
 
-                function findPlayerWrapper(video) {
-                    if (!video) return null;
-                    var el = video.parentElement;
-                    var best = el;
-                    while (el && el !== document.body) {
-                        var rect = el.getBoundingClientRect();
-                        if (rect.width >= video.offsetWidth && rect.height >= video.offsetHeight && rect.height < window.innerHeight * 0.98) {
-                            best = el;
+                function setScheduleFocus(idx) {
+                    const items = getNavItems();
+                    if (!items.length) return;
+                    items.forEach(el => el.classList.remove('tv-focused'));
+                    navIndex = Math.max(0, Math.min(idx, items.length - 1));
+                    const target = items[navIndex];
+                    target.classList.add('tv-focused');
+                    try { target.focus({ preventScroll: true }); } catch (e) {}
+                    target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+                }
+
+                function moveSpatial(dir) {
+                    const items = getNavItems();
+                    if (!items.length) return;
+                    const cur = items[navIndex] || items[0];
+                    const cr = cur.getBoundingClientRect();
+                    const cx = cr.left + cr.width / 2;
+                    const cy = cr.top + cr.height / 2;
+
+                    let bestIdx = -1;
+                    let bestScore = Infinity;
+
+                    for (let i = 0; i < items.length; i++) {
+                        if (i === navIndex) continue;
+                        const r = items[i].getBoundingClientRect();
+                        const x = r.left + r.width / 2;
+                        const y = r.top + r.height / 2;
+                        const dx = x - cx;
+                        const dy = y - cy;
+
+                        if (dir === 'LEFT' && dx >= -10) continue;
+                        if (dir === 'RIGHT' && dx <= 10) continue;
+                        if (dir === 'UP' && dy >= -10) continue;
+                        if (dir === 'DOWN' && dy <= 10) continue;
+
+                        const primary = (dir === 'LEFT' || dir === 'RIGHT') ? Math.abs(dx) : Math.abs(dy);
+                        const secondary = (dir === 'LEFT' || dir === 'RIGHT') ? Math.abs(dy) : Math.abs(dx);
+                        const score = primary + secondary * 2.5;
+                        if (score < bestScore) {
+                            bestScore = score;
+                            bestIdx = i;
                         }
-                        if (el.matches && el.matches('[class*="player"], [id*="player"], .video-js, .plyr, .jwplayer')) {
-                            best = el;
-                            break;
+                    }
+
+                    if (bestIdx !== -1) {
+                        setScheduleFocus(bestIdx);
+                    } else if (dir === 'DOWN' || dir === 'RIGHT') {
+                        setScheduleFocus(Math.min(navIndex + 1, items.length - 1));
+                    } else if (dir === 'UP' || dir === 'LEFT') {
+                        setScheduleFocus(Math.max(navIndex - 1, 0));
+                    }
+                }
+
+                let hudTimer = null;
+                let hudVisible = false;
+                let hudFocusIdx = 0;
+                let activeServerNum = 1;
+                let assumedPlaying = true;
+                let assumedMuted = false;
+
+                function hideDebugAndFloatingUnmute() {
+                    getAllDocs().forEach(doc => {
+                        const allEls = doc.querySelectorAll('div, section, aside, span, p');
+                        for (const el of allEls) {
+                            if (el.closest && el.closest('#tv-leanback-hud')) continue;
+                            const t = (el.innerText || el.textContent || '');
+                            if (t.length < 400 && (t.includes('Buffer Health') || t.includes('Dropped Frames'))) {
+                                el.style.setProperty('display', 'none', 'important');
+                                el.style.setProperty('visibility', 'hidden', 'important');
+                            }
                         }
-                        el = el.parentElement;
-                    }
-                    return best;
-                }
 
-                function enterTheaterFullscreen(video) {
-                    if (!video || exitedTheaterManually) return;
-                    var wrapper = findPlayerWrapper(video);
-                    if (wrapper && !wrapper.classList.contains('streameast-tv-theater-wrapper')) {
-                        if (activeTheaterWrapper && activeTheaterWrapper !== wrapper) {
-                            activeTheaterWrapper.classList.remove('streameast-tv-theater-wrapper');
+                        const btns = doc.querySelectorAll('button, div[role="button"], a, span');
+                        for (const b of btns) {
+                            if (b.closest && b.closest('#tv-leanback-hud')) continue;
+                            const label = ((b.innerText || b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '')).trim().toUpperCase();
+                            if (label === 'UNMUTE' || label.includes('CLICK TO UNMUTE') || label.includes('TAP TO UNMUTE')) {
+                                try { b.click(); } catch (e) {}
+                            }
                         }
-                        wrapper.classList.add('streameast-tv-theater-wrapper');
-                        activeTheaterWrapper = wrapper;
-                        closePlayerHud(video);
-                    }
-                }
-
-                function exitTheaterFullscreen() {
-                    if (activeTheaterWrapper) {
-                        activeTheaterWrapper.classList.remove('streameast-tv-theater-wrapper');
-                        activeTheaterWrapper = null;
-                    }
-                    document.body.classList.remove('streameast-tv-hud-hidden');
-                    hudOpen = false;
-                    userMovedFocusInHud = false;
-                }
-
-                function wakePlayerOverlay(video) {
-                    var target = activeTheaterWrapper || (video && video.parentElement) || video;
-                    if (!target) return;
-                    var rect = target.getBoundingClientRect();
-                    var cx = rect.left + rect.width / 2;
-                    var cy = rect.top + rect.height / 2;
-                    target.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: cx, clientY: cy }));
-                    target.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: cx, clientY: cy }));
-                }
-
-                function isBackButton(el) {
-                    if (!el) return false;
-                    var label = ((el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '') + ' ' + (el.textContent || '')).toLowerCase().trim();
-                    return label === 'back' || label.indexOf('go back') !== -1 || label.indexOf('return') !== -1;
-                }
-
-                function openPlayerHud(video) {
-                    hudOpen = true;
-                    userMovedFocusInHud = false;
-                    document.body.classList.remove('streameast-tv-hud-hidden');
-                    wakePlayerOverlay(video);
-                    resetHudAutoHide();
-                    if (document.activeElement && document.activeElement.blur) {
-                        document.activeElement.blur();
-                    }
-                }
-
-                function closePlayerHud(video) {
-                    hudOpen = false;
-                    userMovedFocusInHud = false;
-                    document.body.classList.add('streameast-tv-hud-hidden');
-                    clearTimeout(hudHideTimer);
-                    if (document.activeElement && document.activeElement.blur) {
-                        document.activeElement.blur();
-                    }
-                    if (video) {
-                        var target = activeTheaterWrapper || video.parentElement || video;
-                        target.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
-                    }
-                }
-
-                function resetHudAutoHide() {
-                    clearTimeout(hudHideTimer);
-                    hudHideTimer = setTimeout(function() {
-                        var v = getActiveVideo();
-                        if (v && !v.paused) {
-                            closePlayerHud(v);
-                        }
-                    }, 4500);
-                }
-
-                function formatTime(sec) {
-                    if (!isFinite(sec) || sec < 0) sec = 0;
-                    var m = Math.floor(sec / 60);
-                    var s = Math.floor(sec % 60);
-                    return m + ':' + (s < 10 ? '0' : '') + s;
-                }
-
-                function getVisibleFocusables(insidePlayerOnly) {
-                    var root = (insidePlayerOnly && activeTheaterWrapper) ? activeTheaterWrapper : document;
-                    var selector = 'a[href], button, input, select, [tabindex]:not([tabindex="-1"]), [role="button"], [role="switch"]';
-                    var nodes = Array.prototype.slice.call(root.querySelectorAll(selector));
-                    return nodes.filter(function(el) {
-                        if (el.disabled || el.classList.contains('streameast-tv-hide-clutter')) return false;
-                        if (insidePlayerOnly && isBackButton(el)) return false;
-                        var style = window.getComputedStyle(el);
-                        if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) return false;
-                        var rect = el.getBoundingClientRect();
-                        return rect.width > 4 && rect.height > 4;
                     });
                 }
 
-                function moveSpatialFocus(direction, insidePlayerOnly) {
-                    var candidates = getVisibleFocusables(insidePlayerOnly);
-                    if (candidates.length === 0) return;
-
-                    var current = document.activeElement;
-                    if (!current || candidates.indexOf(current) === -1) {
-                        candidates[0].focus();
-                        candidates[0].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                function applyTheaterAndUnmute() {
+                    if (!isStreamPage()) {
+                        document.body.classList.remove('tv-theater-mode');
                         return;
                     }
+                    document.body.classList.add('tv-theater-mode');
 
-                    var curRect = current.getBoundingClientRect();
-                    var curCx = curRect.left + curRect.width / 2;
-                    var curCy = curRect.top + curRect.height / 2;
-
-                    var best = null;
-                    var bestScore = Infinity;
-
-                    for (var i = 0; i < candidates.length; i++) {
-                        var el = candidates[i];
-                        if (el === current) continue;
-                        var r = el.getBoundingClientRect();
-                        var cx = r.left + r.width / 2;
-                        var cy = r.top + r.height / 2;
-                        var dx = cx - curCx;
-                        var dy = cy - curCy;
-
-                        var inDirection = false;
-                        var primaryDist = 0;
-                        var crossDist = 0;
-
-                        if (direction === 'ArrowRight' && dx > 8) {
-                            inDirection = true; primaryDist = dx; crossDist = Math.abs(dy);
-                        } else if (direction === 'ArrowLeft' && dx < -8) {
-                            inDirection = true; primaryDist = -dx; crossDist = Math.abs(dy);
-                        } else if (direction === 'ArrowDown' && dy > 8) {
-                            inDirection = true; primaryDist = dy; crossDist = Math.abs(dx);
-                        } else if (direction === 'ArrowUp' && dy < -8) {
-                            inDirection = true; primaryDist = -dy; crossDist = Math.abs(dx);
+                    const iframe = findPlayerIframe();
+                    if (iframe) {
+                        iframe.classList.add('tv-player-fullscreen');
+                        let p = iframe.parentElement;
+                        while (p && p !== document.body) {
+                            p.style.setProperty('transform', 'none', 'important');
+                            p.style.setProperty('overflow', 'visible', 'important');
+                            p = p.parentElement;
                         }
+                    }
 
-                        if (inDirection) {
-                            var score = primaryDist + (crossDist * 2.5);
-                            if (score < bestScore) {
-                                bestScore = score;
-                                best = el;
+                    const videos = findAllVideos();
+                    videos.forEach(v => {
+                        v.classList.add('tv-player-fullscreen');
+                        v.style.setProperty('position', 'fixed', 'important');
+                        v.style.setProperty('top', '0', 'important');
+                        v.style.setProperty('left', '0', 'important');
+                        v.style.setProperty('width', '100vw', 'important');
+                        v.style.setProperty('height', '100vh', 'important');
+                        v.style.setProperty('object-fit', 'contain', 'important');
+                        v.style.setProperty('z-index', '2147483640', 'important');
+                        if (!v.dataset.tvUnmuted) {
+                            v.dataset.tvUnmuted = '1';
+                            v.muted = false;
+                            v.volume = 1.0;
+                            if (v.paused) {
+                                try { v.play().catch(() => {}); } catch (e) {}
                             }
                         }
-                    }
+                    });
 
-                    if (best) {
-                        best.focus();
-                        best.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-                    }
+                    hideDebugAndFloatingUnmute();
                 }
 
-                // Main key router called from Android dispatchKeyEvent
-                window.__streamEastHandleTvKey = function(key) {
-                    var video = getActiveVideo();
+                function getStreamTitle() {
+                    const h = document.querySelector('h1, h2, .stream-title, .match-title');
+                    const raw = (h && h.innerText ? h.innerText : document.title || 'Live Stream').trim();
+                    return raw.replace(/\s*\|\s*StreamEast.*/i, '').trim() || 'Live Stream';
+                }
 
-                    // A. VIDEO PLAYBACK MODE
-                    if (video) {
-                        if (key === 'MediaPlayPause') {
-                            if (video.paused) { video.play(); showHudToast('▶ Playing'); resetHudAutoHide(); }
-                            else { video.pause(); showHudToast('❚❚ Paused'); openPlayerHud(video); }
-                            return true;
-                        }
-                        if (key === 'MediaFastForward') {
-                            video.currentTime = Math.min(video.duration || video.currentTime + 10, video.currentTime + 10);
-                            showHudToast('⏩ +10s (' + formatTime(video.currentTime) + ')');
-                            return true;
-                        }
-                        if (key === 'MediaRewind') {
-                            video.currentTime = Math.max(0, video.currentTime - 10);
-                            showHudToast('⏪ -10s (' + formatTime(video.currentTime) + ')');
-                            return true;
-                        }
+                function ensureHud() {
+                    let hud = document.getElementById('tv-leanback-hud');
+                    if (hud) return hud;
+                    hud = document.createElement('div');
+                    hud.id = 'tv-leanback-hud';
+                    hud.innerHTML = `
+                        <div class="tv-hud-top">
+                            <span class="tv-live-badge">• LIVE</span>
+                            <span class="tv-stream-title" id="tv-hud-title"></span>
+                        </div>
+                        <div class="tv-hud-controls">
+                            <button class="tv-hud-btn" data-hud-idx="0" id="tv-btn-play">Pause</button>
+                            <button class="tv-hud-btn" data-hud-idx="1" id="tv-btn-mute">Mute</button>
+                            <button class="tv-hud-btn" data-hud-idx="2" id="tv-btn-s1">Server 1</button>
+                            <button class="tv-hud-btn" data-hud-idx="3" id="tv-btn-s2">Server 2</button>
+                            <button class="tv-hud-btn" data-hud-idx="4" id="tv-btn-s3">Server 3</button>
+                        </div>
+                    `;
+                    document.body.appendChild(hud);
+                    return hud;
+                }
 
-                        // State 1: HUD is HIDDEN (clean edge-to-edge fullscreen watching)
-                        if (!hudOpen) {
-                            if (key === 'ArrowLeft') {
-                                video.currentTime = Math.max(0, video.currentTime - 10);
-                                showHudToast('⏪ -10s (' + formatTime(video.currentTime) + ')');
-                                return true;
-                            }
-                            if (key === 'ArrowRight') {
-                                video.currentTime = Math.min(video.duration || video.currentTime + 10, video.currentTime + 10);
-                                showHudToast('⏩ +10s (' + formatTime(video.currentTime) + ')');
-                                return true;
-                            }
-                            if (key === 'ArrowUp' || key === 'ArrowDown') {
-                                openPlayerHud(video);
-                                setTimeout(function() {
-                                    moveSpatialFocus('ArrowRight', true);
-                                    userMovedFocusInHud = true;
-                                }, 50);
-                                return true;
-                            }
-                            if (key === 'Enter') {
-                                if (video.paused) {
-                                    video.play();
-                                    showHudToast('▶ Playing');
-                                    openPlayerHud(video);
-                                } else {
-                                    video.pause();
-                                    showHudToast('❚❚ Paused');
-                                    openPlayerHud(video);
-                                }
-                                return true;
-                            }
-                            if (key === 'Back') {
-                                if (activeTheaterWrapper) {
-                                    exitedTheaterManually = true;
-                                    exitTheaterFullscreen();
-                                    return true;
-                                }
-                                return false;
-                            }
-                        }
+                function updateHudUI() {
+                    const hud = ensureHud();
+                    const titleEl = document.getElementById('tv-hud-title');
+                    if (titleEl) titleEl.textContent = getStreamTitle();
 
-                        // State 2: HUD is OPEN
-                        if (hudOpen) {
-                            resetHudAutoHide();
-                            wakePlayerOverlay(video);
+                    const vids = findAllVideos();
+                    const isPlaying = vids.length ? !vids[0].paused : assumedPlaying;
+                    const isMuted = vids.length ? vids[0].muted : assumedMuted;
 
-                            if (key === 'Back') {
-                                closePlayerHud(video);
-                                return true;
-                            }
-                            if (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight') {
-                                userMovedFocusInHud = true;
-                                moveSpatialFocus(key, true);
-                                return true;
-                            }
-                            if (key === 'Enter') {
-                                var active = document.activeElement;
-                                if (userMovedFocusInHud && active && active !== document.body && active !== video && !isBackButton(active)) {
-                                    active.click();
-                                } else {
-                                    if (video.paused) {
-                                        video.play();
-                                        showHudToast('▶ Playing');
-                                        resetHudAutoHide();
-                                    } else {
-                                        video.pause();
-                                        showHudToast('❚❚ Paused');
-                                    }
-                                }
-                                return true;
-                            }
+                    const playBtn = document.getElementById('tv-btn-play');
+                    const muteBtn = document.getElementById('tv-btn-mute');
+                    if (playBtn) playBtn.textContent = isPlaying ? 'Pause' : 'Play';
+                    if (muteBtn) muteBtn.textContent = isMuted ? 'Unmute' : 'Mute';
+
+                    const btns = Array.from(hud.querySelectorAll('.tv-hud-btn'));
+                    btns.forEach((b, i) => {
+                        b.classList.toggle('hud-focused', i === hudFocusIdx);
+                        b.classList.toggle('active-server', i === activeServerNum + 1);
+                    });
+                }
+
+                function showHud(resetFocus) {
+                    const hud = ensureHud();
+                    if (resetFocus) hudFocusIdx = 0;
+                    hudVisible = true;
+                    updateHudUI();
+                    hud.classList.add('visible');
+                    clearTimeout(hudTimer);
+                    hudTimer = setTimeout(() => hideHud(), 3500);
+                }
+
+                function hideHud() {
+                    const hud = document.getElementById('tv-leanback-hud');
+                    if (hud) hud.classList.remove('visible');
+                    hudVisible = false;
+                    clearTimeout(hudTimer);
+                }
+
+                function togglePlayPause() {
+                    const vids = findAllVideos();
+                    if (vids.length) {
+                        vids.forEach(v => {
+                            if (v.paused) v.play().catch(() => {});
+                            else v.pause();
+                        });
+                    } else {
+                        assumedPlaying = !assumedPlaying;
+                        const iframe = findPlayerIframe();
+                        if (iframe && iframe.contentWindow) {
+                            try {
+                                iframe.contentWindow.postMessage(
+                                    JSON.stringify({ event: 'command', func: assumedPlaying ? 'playVideo' : 'pauseVideo' }),
+                                    '*'
+                                );
+                            } catch (e) {}
                         }
                     }
+                    showHud(false);
+                }
 
-                    // B. BROWSE / MENU MODE
-                    if (key === 'Back') {
-                        return false;
-                    }
-                    if (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight') {
-                        moveSpatialFocus(key, false);
-                        return true;
-                    }
-                    if (key === 'Enter') {
-                        var el = document.activeElement;
-                        if (el && el !== document.body) {
-                            el.click();
+                function toggleMute() {
+                    const vids = findAllVideos();
+                    if (vids.length) {
+                        const targetMuted = !vids[0].muted;
+                        vids.forEach(v => {
+                            v.muted = targetMuted;
+                            if (!targetMuted) v.volume = 1.0;
+                        });
+                    } else {
+                        assumedMuted = !assumedMuted;
+                        const iframe = findPlayerIframe();
+                        if (iframe && iframe.contentWindow) {
+                            try {
+                                iframe.contentWindow.postMessage(
+                                    JSON.stringify({ event: 'command', func: assumedMuted ? 'mute' : 'unMute' }),
+                                    '*'
+                                );
+                            } catch (e) {}
                         }
+                    }
+                    showHud(false);
+                }
+
+                function switchServer(num) {
+                    activeServerNum = num;
+                    const candidates = Array.from(document.querySelectorAll('a, button, [role="button"]')).filter(el => {
+                        if (el.closest('#tv-leanback-hud')) return false;
+                        const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+                        return t.includes('server') || t.includes('stream ' + num) || t === 'hd ' + num || t === String(num);
+                    });
+                    const exact = candidates.find(el => {
+                        const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+                        return t.includes('server ' + num) || t.includes('server' + num) || t.includes('stream ' + num);
+                    }) || candidates[num - 1];
+
+                    if (exact) {
+                        try { exact.click(); } catch (e) {}
+                        setTimeout(applyTheaterAndUnmute, 600);
+                    }
+                    showHud(false);
+                }
+
+                function activateHudButton() {
+                    if (hudFocusIdx === 0) togglePlayPause();
+                    else if (hudFocusIdx === 1) toggleMute();
+                    else if (hudFocusIdx === 2) switchServer(1);
+                    else if (hudFocusIdx === 3) switchServer(2);
+                    else if (hudFocusIdx === 4) switchServer(3);
+                }
+
+                window.__tvHandleKey = function(key) {
+                    if (isStreamPage()) {
+                        if (key === 'PLAY_PAUSE') {
+                            togglePlayPause();
+                            return;
+                        }
+                        if (key === 'CENTER') {
+                            if (!hudVisible) {
+                                showHud(true);
+                            } else {
+                                activateHudButton();
+                            }
+                            return;
+                        }
+                        if (key === 'LEFT') {
+                            if (!hudVisible) showHud(true);
+                            else {
+                                hudFocusIdx = (hudFocusIdx + 4) % 5;
+                                showHud(false);
+                            }
+                            return;
+                        }
+                        if (key === 'RIGHT') {
+                            if (!hudVisible) showHud(true);
+                            else {
+                                hudFocusIdx = (hudFocusIdx + 1) % 5;
+                                showHud(false);
+                            }
+                            return;
+                        }
+                        if (key === 'UP' || key === 'DOWN') {
+                            if (!hudVisible) showHud(true);
+                            else showHud(false);
+                            return;
+                        }
+                    } else {
+                        if (key === 'UP' || key === 'DOWN' || key === 'LEFT' || key === 'RIGHT') {
+                            moveSpatial(key);
+                        } else if (key === 'CENTER') {
+                            const items = getNavItems();
+                            const target = items[navIndex];
+                            if (target) target.click();
+                        }
+                    }
+                };
+
+                window.__tvHandleBack = function() {
+                    if (isStreamPage() && hudVisible) {
+                        hideHud();
                         return true;
                     }
                     return false;
                 };
 
-                // 6. Auto-attach fullscreen theater mode & clutter cleanup whenever a video loads/plays
-                function attachVideoHooks() {
-                    var video = getActiveVideo();
-                    if (!video) {
-                        if (activeTheaterWrapper) {
-                            exitTheaterFullscreen();
-                        }
-                        exitedTheaterManually = false;
-                        return;
+                window.__tvRefresh = function() {
+                    if (isStreamPage()) {
+                        applyTheaterAndUnmute();
+                    } else {
+                        document.body.classList.remove('tv-theater-mode');
+                        hideHud();
+                        setScheduleFocus(navIndex);
                     }
+                };
 
-                    if (!video.__streamEastHooked) {
-                        video.__streamEastHooked = true;
-                        exitedTheaterManually = false;
-                        enterTheaterFullscreen(video);
-
-                        video.addEventListener('play', function() {
-                            if (!exitedTheaterManually) {
-                                enterTheaterFullscreen(video);
-                            }
-                        });
-                        video.addEventListener('loadeddata', function() {
-                            if (!exitedTheaterManually) {
-                                enterTheaterFullscreen(video);
-                            }
-                        });
-                    } else if (!exitedTheaterManually && !activeTheaterWrapper) {
-                        enterTheaterFullscreen(video);
-                    }
-
-                    var container = activeTheaterWrapper || video.closest('[class*="player"], [id*="player"], .video-js, .plyr, .jwplayer') || video.parentElement;
-                    if (!container) return;
-
-                    var hiddenLabels = ['picture in picture', 'pip', 'cast', 'chromecast', 'download', 'fullscreen', 'volume', 'mute'];
-                    var buttons = container.querySelectorAll('button, [role="button"]');
-                    for (var i = 0; i < buttons.length; i++) {
-                        var btn = buttons[i];
-                        var label = ((btn.getAttribute('aria-label') || '') + ' ' + (btn.getAttribute('title') || '') + ' ' + (btn.textContent || '')).toLowerCase().trim();
-                        for (var j = 0; j < hiddenLabels.length; j++) {
-                            if (label === hiddenLabels[j] || label.indexOf(hiddenLabels[j]) !== -1) {
-                                btn.classList.add('streameast-tv-hide-clutter');
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                attachVideoHooks();
-
-                var observer = new MutationObserver(function() {
-                    attachVideoHooks();
-                });
-                observer.observe(document.body, { childList: true, subtree: true });
+                window.__tvRefresh();
+                let ticks = 0;
+                const bootInterval = setInterval(() => {
+                    ticks++;
+                    if (isStreamPage()) applyTheaterAndUnmute();
+                    if (ticks >= 25) clearInterval(bootInterval);
+                }, 600);
             })();
         """.trimIndent()
 
-        view?.evaluateJavascript(js, null)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        webView.onPause()
-        CookieManager.getInstance().flush()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        webView.onResume()
+        webView.evaluateJavascript(js, null)
     }
 }
